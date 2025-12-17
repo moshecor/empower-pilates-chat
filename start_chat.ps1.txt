@@ -1,0 +1,18 @@
+# Move to project folder
+cd C:\pilates-chat
+
+# Activate virtual environment
+if (Test-Path ".\venv\Scripts\Activate.ps1") {
+    .\venv\Scripts\Activate.ps1
+} elseif (Test-Path ".\.venv\Scripts\Activate.ps1") {
+    .\.venv\Scripts\Activate.ps1
+} else {
+    Write-Host "❌ Virtual environment not found"
+    pause
+    exit
+}
+
+# Start FastAPI server
+python -m uvicorn app:app --reload --port 8000
+
+pause
