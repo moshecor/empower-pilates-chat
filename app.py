@@ -2,14 +2,14 @@ import os, json, re, sqlite3, smtplib
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from typing import Optional
-from openai import OpenAI
+from typing import Optional, Tuple, Dict, Any, List
 
 import requests
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from openai import OpenAI
 
 # =========================
 # ENV / CONFIG
@@ -17,12 +17,11 @@ from pydantic import BaseModel
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 client = OpenAI(api_key=OPENAI_API_KEY)
+
 APP_TOKEN   = os.getenv("APP_TOKEN", "changeme")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "changeme")
 
 DB_PATH      = os.getenv("DB_PATH", "chat.db")
-OLLAMA_HOST  = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
 
 SMTP_HOST  = os.getenv("SMTP_HOST", "")
 SMTP_PORT  = int(os.getenv("SMTP_PORT", "587"))
@@ -46,7 +45,7 @@ BUSINESS = {
         "Free Trial Class for newcomers: 25-minute intro session",
         "Intro Offer: 5 classes for $95",
     ],
-    "classes": ["Pilates"],  # single type
+    "classes": ["Pilates"],
 }
 
 # =========================
@@ -270,26 +269,25 @@ def send_email(subject: str, body: str):
         pass
 
 # =========================
-# INTENTS / PARSING
+# PARSING / INTENTS
 # =========================
 def normalize_phone(text: str) -> str:
     digits = re.sub(r"\D", "", text or "")
     return digits[-10:] if len(digits) >= 10 else ""
 
 def extract_name(text: str) -> str:
-    # simple but solid
     m = re.search(r"\b(my name is|i am|this is)\s+([A-Za-z][A-Za-z\s'-]{1,40})\b", text or "", re.IGNORECASE)
     return m.group(2).strip() if m else ""
 
 def looks_like_new(text: str) -> bool:
-    return bool(re.search(r"\b(new|first time|first-time|i'm new|yes i'm new)\b", text or "", re.IGNORECASE))
+    return bool(re.search(r"\b(new|first time|first-time|i'?m new|yes i'?m new)\b", text or "", re.IGNORECASE))
 
 def looks_like_returning(text: str) -> bool:
     return bool(re.search(r"\b(returning|been before|existing|not new)\b", text or "", re.IGNORECASE))
 
 def is_booking_intent(text: str) -> bool:
     t = (text or "").lower()
-    return any(k in t for k in ["book", "booking", "schedule", "appointment", "reserve", "sign up", "class"])
+    return any(k in t for k in ["book", "booking", "schedule", "appointment", "reserve", "sign up", "class", "trial"])
 
 def is_hours_intent(text: str) -> bool:
     t = (text or "").lower()
@@ -301,22 +299,67 @@ def is_location_intent(text: str) -> bool:
 
 def is_free_trial_intent(text: str) -> bool:
     t = (text or "").lower()
-    return any(k in t for k in ["free trial", "trial"])
+    return any(k in t for k in ["free trial", "trial", "first class free"])
+
+WEEKDAYS = {
+    "monday":"Monday","mon":"Monday",
+    "tuesday":"Tuesday","tue":"Tuesday","tues":"Tuesday",
+    "wednesday":"Wednesday","wed":"Wednesday",
+    "thursday":"Thursday","thu":"Thursday","thur":"Thursday","thurs":"Thursday",
+    "friday":"Friday","fri":"Friday",
+    "saturday":"Saturday","sat":"Saturday",
+    "sunday":"Sunday","sun":"Sunday",
+}
+
+def parse_day_time(text: str) -> Tuple[str, str]:
+    """Very small heuristic to extract preferred day + time window.
+    Returns (day, time_window) where either may be "" if unknown."""
+    t = (text or "").lower()
+    day = ""
+    for k, v in WEEKDAYS.items():
+        if re.search(rf"\b{k}\b", t):
+            day = v
+            break
+
+    # time window
+    # recognize "morning/afternoon/evening" or times like 6pm, 18:30, etc.
+    time_window = ""
+    if re.search(r"\bmorning\b", t):
+        time_window = "morning"
+    elif re.search(r"\bafternoon\b", t):
+        time_window = "afternoon"
+    elif re.search(r"\bevening\b|\btonight\b", t):
+        time_window = "evening"
+
+    # specific time?
+    m = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", t)
+    if m:
+        hh = int(m.group(1))
+        mm = int(m.group(2) or "00")
+        ap = m.group(3).lower()
+        # normalize to e.g. 6:30 PM
+        time_window = f"{hh}:{mm:02d} {ap.upper()}"
+
+    m2 = re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", t)
+    if m2 and not time_window:
+        time_window = f"{m2.group(1)}:{m2.group(2)}"
+
+    return day, time_window
 
 def build_suggestions(state: str) -> list[str]:
-    # smart quick replies
+    # more "WhatsApp-ish" quick replies
     if state == "idle":
-        return ["Book a class", "Free trial", "What are your hours?", "Where are you located?"]
+        return ["Book a class", "Free trial", "Hours", "Address"]
     if state == "collect_is_new":
-        return ["I'm a new client", "I'm returning"]
+        return ["New client", "Returning"]
     if state == "collect_day_time":
-        return ["Tuesday evening", "Thursday morning", "Weekend morning"]
+        return ["Tuesday evening", "Thursday morning", "Sunday morning"]
     if state == "collect_name_phone":
-        return ["My name is John Doe, 9085551234"]
+        return ["My name is Jane Doe, 9085551234"]
     return ["Book a class"]
 
 # =========================
-# LLM (human-like)
+# LLM CORE (human-like, controlled)
 # =========================
 def call_openai_json(system: str, user: str, timeout: int = 45) -> dict:
     if not OPENAI_API_KEY:
@@ -336,30 +379,26 @@ def call_openai_json(system: str, user: str, timeout: int = 45) -> dict:
     try:
         return json.loads(text)
     except Exception:
+        # last resort: treat it as text
         return {"reply": text[:900] if text else "Sorry — something went wrong."}
-def call_ollama(prompt: str) -> str:
-    r = requests.post(
-        f"{OLLAMA_HOST}/api/generate",
-        json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
-        timeout=180,
-    )
-    r.raise_for_status()
-    return (r.json().get("response") or "").strip()
 
-def qa_reply(session_id: str, user_msg: str, state: str = "idle") -> str:
-    history = fetch_recent_messages(session_id, limit=16)
-    transcript = "\n".join(
-        [f"{'USER' if m['role']=='user' else 'ASSISTANT'}: {m['content']}" for m in history]
-    )
+def _human_system_base() -> str:
+    return f"""
+You are a warm, human-sounding WhatsApp assistant for {BUSINESS["name"]}.
+Write in English.
 
-    system = f"""
-You are a friendly, human-sounding assistant for {BUSINESS["name"]}.
-ALWAYS reply in English.
+Voice & style (hard rules):
+- Keep it short: 1–2 sentences max.
+- Natural, friendly, not salesy.
+- Mirror the user's message briefly (1 short clause) before guiding.
+- Ask exactly ONE question (or none if you are giving info).
+- No emojis spam: at most 1 emoji, and only sometimes.
+- Never mention you're an AI. Never over-explain.
 
-Hard rules:
-- Never invent user details (name, phone, day, time). If missing, ask.
-- Ask only ONE question at the end.
-- Do not invent pricing or availability beyond the facts below.
+Safety & accuracy (hard rules):
+- Do NOT invent prices, availability, classes, promotions, policies beyond the facts provided.
+- If asked for something unknown, offer a call to the studio phone number.
+- If user seems upset/confused: apologize briefly and offer human handoff.
 
 Business facts:
 - Address: {BUSINESS["address"]}
@@ -367,9 +406,83 @@ Business facts:
 - Email: {BUSINESS["email"]}
 - Hours: {", ".join(BUSINESS["hours"])}
 - Offers: {", ".join(BUSINESS["offers"])}
+""".strip()
 
-Current booking state: {state}
+def _repair_reply_if_needed(text: str) -> str:
+    """Enforce: short + max 1 question mark."""
+    if not text:
+        return "Sorry — can you rephrase that?"
+    t = text.strip()
 
+    # hard cap
+    if len(t) > 420:
+        t = t[:420].rstrip()
+
+    # keep at most 1 question
+    if t.count("?") > 1:
+        first = t.find("?")
+        t = t[: first + 1].strip()
+
+    # remove super-salesy openings
+    t = re.sub(r"^(welcome to|thank you for reaching out to|we are delighted to)", "Hi —", t, flags=re.I).strip()
+
+    return t
+
+def humanize_text(session_id: str, raw_assistant_text: str, state: str, must_ask: Optional[str] = None) -> str:
+    """
+    Takes a deterministic bot line and rewrites it to sound human,
+    while preserving the intent and keeping it short.
+    must_ask: if provided, force that exact question to be the only question.
+    """
+    if not OPENAI_API_KEY:
+        # fallback: just return raw
+        return _repair_reply_if_needed(raw_assistant_text)
+
+    system = _human_system_base() + f"\n\nCurrent flow state: {state}\nReturn ONLY JSON: {{\"reply\":\"...\"}}"
+    user = f"""
+Rewrite the following draft message to match the voice rules.
+Keep the same meaning. Do not add new facts.
+
+DRAFT:
+{raw_assistant_text}
+
+{"You MUST end with this exact question (and no other questions): " + must_ask if must_ask else ""}
+""".strip()
+
+    data = call_openai_json(system, user)
+    reply = (data.get("reply") or "").strip()
+    reply = _repair_reply_if_needed(reply)
+
+    # if we must ask something, enforce it hard
+    if must_ask:
+        # strip trailing questions and append must_ask
+        reply = re.sub(r"\s*\?+.*$", "", reply).strip()
+        # keep it short
+        if len(reply) > 260:
+            reply = reply[:260].rstrip()
+        reply = (reply + ("\n" if reply and not reply.endswith("\n") else "") + must_ask).strip()
+
+        # ensure only one question mark
+        if reply.count("?") > 1:
+            # keep everything up to the must_ask only
+            reply = reply.split("\n")[-1].strip() if reply.split("\n")[-1].strip().endswith("?") else must_ask
+
+    return reply
+
+def qa_reply(session_id: str, user_msg: str, state: str = "idle") -> str:
+    history = fetch_recent_messages(session_id, limit=16)
+    transcript = "\n".join(
+        [f"{'USER' if m['role']=='user' else 'ASSISTANT'}: {m['content']}" for m in history]
+    )
+
+    system = _human_system_base() + f"""
+
+You must be helpful and concise.
+If the user is asking to book, move them toward booking in the current state.
+
+Hard rules:
+- Ask ONLY one question.
+- If you don't know, offer calling {BUSINESS["phone"]}.
 Return ONLY JSON: {{"reply":"..."}}
 """.strip()
 
@@ -381,16 +494,7 @@ USER MESSAGE:
 """.strip()
 
     data = call_openai_json(system, user)
-    return (data.get("reply") or "").strip()[:900] or "Sorry — can you rephrase that?"
-
-
-    prompt = f"{system}\n\nCHAT HISTORY:\n{transcript}\n\nUSER: {user_msg}\nASSISTANT:"
-    raw = call_ollama(prompt)
-    try:
-        data = json.loads(raw)
-        return (data.get("reply") or "").strip() or raw[:900]
-    except Exception:
-        return raw[:900]
+    return _repair_reply_if_needed((data.get("reply") or "").strip())[:900] or "Sorry — can you rephrase that?"
 
 # =========================
 # FASTAPI
@@ -416,7 +520,6 @@ def home():
 
 @app.get("/favicon.ico")
 def favicon():
-    # optional: put static/favicon.ico if you want
     path = "static/favicon.ico"
     if os.path.exists(path):
         return FileResponse(path)
@@ -429,12 +532,8 @@ def health():
         con = db(); con.execute("SELECT 1"); con.close()
     except Exception:
         db_ok = False
-    ollama_ok = True
-    try:
-        requests.post(f"{OLLAMA_HOST}/api/tags", timeout=5)
-    except Exception:
-        ollama_ok = False
-    return JSONResponse({"ok": db_ok and ollama_ok, "db_ok": db_ok, "ollama_ok": ollama_ok, "model": OLLAMA_MODEL})
+    # OpenAI isn't pinged here; keep it simple
+    return JSONResponse({"ok": db_ok, "db_ok": db_ok, "model": OPENAI_MODEL})
 
 @app.post("/api/reset")
 def api_reset(payload: ResetIn, x_app_token: str | None = Header(default=None)):
@@ -457,78 +556,133 @@ def chat(payload: ChatIn, x_app_token: str | None = Header(default=None)):
         raise HTTPException(status_code=400, detail="session_id and message are required")
 
     if not rate_limit_ok(session_id):
-        return {"reply": "One sec 🙂 You’re sending messages too fast. Please try again in a moment.", "suggestions": build_suggestions(get_session(session_id).get("state","idle"))}
+        s = get_session(session_id)
+        return {
+            "reply": "One sec 🙂 You’re sending messages too fast. Try again in a moment?",
+            "suggestions": build_suggestions(s.get("state","idle"))
+        }
 
     add_message(session_id, "user", msg)
     s = get_session(session_id)
+    state = s.get("state","idle")
 
-    # Fast intents (no LLM needed)
+    # -------------------------
+    # Fast intents (no LLM)
+    # -------------------------
     if is_hours_intent(msg):
-        reply = f"Our hours are:\n- " + "\n- ".join(BUSINESS["hours"])
+        raw = "Our hours are:\n- " + "\n- ".join(BUSINESS["hours"])
+        reply = humanize_text(session_id, raw, state="idle")
         add_message(session_id, "assistant", reply)
-        return {"reply": reply, "suggestions": build_suggestions(s.get("state","idle"))}
+        return {"reply": reply, "suggestions": build_suggestions(state)}
 
     if is_location_intent(msg):
-        reply = f"We’re located at {BUSINESS['address']}. If you’d like, you can call {BUSINESS['phone']} for directions."
+        raw = f"We’re at {BUSINESS['address']}. If you want, you can call {BUSINESS['phone']} for directions."
+        reply = humanize_text(session_id, raw, state="idle")
         add_message(session_id, "assistant", reply)
-        return {"reply": reply, "suggestions": build_suggestions(s.get("state","idle"))}
+        return {"reply": reply, "suggestions": build_suggestions(state)}
 
     if is_free_trial_intent(msg):
-        reply = "Yes — we offer a free trial for newcomers: a 25-minute intro session. Would you like to book it? If so, are you new or returning?"
-        add_message(session_id, "assistant", reply)
+        raw = "Yes — we do a free trial for newcomers (25-minute intro)."
         # push booking flow
-        if s["state"] == "idle":
+        if state == "idle":
             update_session(session_id, state="collect_is_new", class_type="Pilates")
-        return {"reply": reply, "suggestions": build_suggestions(get_session(session_id)["state"])}
+            state = "collect_is_new"
+        reply = humanize_text(session_id, raw, state=state, must_ask="Are you a new client or returning?")
+        add_message(session_id, "assistant", reply)
+        return {"reply": reply, "suggestions": build_suggestions(state)}
 
+    # -------------------------
     # Start booking flow
-    if s["state"] == "idle" and is_booking_intent(msg):
+    # -------------------------
+    if state == "idle" and is_booking_intent(msg):
         update_session(session_id, state="collect_is_new", class_type="Pilates")
-        reply = "Absolutely — I can help get you scheduled. Are you a new client or returning?"
+        reply = humanize_text(
+            session_id,
+            "I can help you get scheduled.",
+            state="collect_is_new",
+            must_ask="Are you a new client or returning?"
+        )
         add_message(session_id, "assistant", reply)
         return {"reply": reply, "suggestions": build_suggestions("collect_is_new")}
 
-    # If user says "yes" in idle — be smart
-    if s["state"] == "idle" and re.search(r"\b(yes|yeah|yep)\b", msg.lower()):
-        reply = "Got it 🙂 Are you looking to book a Pilates class, or did you want our hours/location?"
+    # Smart "yes" in idle
+    if state == "idle" and re.search(r"\b(yes|yeah|yep|sure)\b", msg.lower()):
+        reply = humanize_text(
+            session_id,
+            "Got it.",
+            state="idle",
+            must_ask="Are you trying to book a class, or did you need our hours/address?"
+        )
         add_message(session_id, "assistant", reply)
         return {"reply": reply, "suggestions": build_suggestions("idle")}
 
-    # Booking flow (with AI improvise)
-    if s["state"] == "collect_is_new":
+    # -------------------------
+    # Booking flow steps
+    # -------------------------
+    if state == "collect_is_new":
         is_new = ""
-        if looks_like_new(msg): is_new = "new"
-        elif looks_like_returning(msg): is_new = "returning"
+        if looks_like_new(msg):
+            is_new = "new"
+        elif looks_like_returning(msg):
+            is_new = "returning"
 
         if not is_new:
-            ai = qa_reply(session_id, msg, state="collect_is_new")
-            reply = ai.rstrip() + "\n\nJust to confirm — are you a new client or returning?"
+            # keep it human but force the question
+            hint = qa_reply(session_id, msg, state="collect_is_new")
+            reply = humanize_text(
+                session_id,
+                hint if hint else "No problem.",
+                state="collect_is_new",
+                must_ask="Just to confirm — are you a new client or returning?"
+            )
             add_message(session_id, "assistant", reply)
             return {"reply": reply, "suggestions": build_suggestions("collect_is_new")}
 
         update_session(session_id, is_new=is_new, state="collect_day_time")
-        reply = "Great. What day works best, and what time window do you prefer?"
+        reply = humanize_text(
+            session_id,
+            "Perfect.",
+            state="collect_day_time",
+            must_ask="What day works best, and what time window do you prefer?"
+        )
         add_message(session_id, "assistant", reply)
         return {"reply": reply, "suggestions": build_suggestions("collect_day_time")}
 
-    if s["state"] == "collect_day_time":
-        pref = msg
-        update_session(session_id, preferred_day=pref, preferred_time=pref, state="collect_name_phone")
-        reply = "Perfect. What’s your full name and best phone number for confirmation?"
+    if state == "collect_day_time":
+        day, t_window = parse_day_time(msg)
+        # store best effort; keep whatever user typed too, but split if possible
+        update_session(
+            session_id,
+            preferred_day=day or (s.get("preferred_day") or msg),
+            preferred_time=t_window or (s.get("preferred_time") or ""),
+            state="collect_name_phone"
+        )
+        reply = humanize_text(
+            session_id,
+            "Got it.",
+            state="collect_name_phone",
+            must_ask="What’s your full name and best phone number for confirmation?"
+        )
         add_message(session_id, "assistant", reply)
         return {"reply": reply, "suggestions": build_suggestions("collect_name_phone")}
 
-    if s["state"] == "collect_name_phone":
-        name = extract_name(msg) or s.get("name","")
-        phone = normalize_phone(msg) or s.get("phone","")
+    if state == "collect_name_phone":
+        name = extract_name(msg) or (s.get("name","") or "")
+        phone = normalize_phone(msg) or (s.get("phone","") or "")
         update_session(session_id, name=name, phone=phone)
 
         if not name or not phone:
-            ai = qa_reply(session_id, msg, state="collect_name_phone")
-            reply = ai.rstrip() + "\n\nPlease share your full name and a 10-digit phone number."
+            hint = qa_reply(session_id, msg, state="collect_name_phone")
+            reply = humanize_text(
+                session_id,
+                hint if hint else "Almost there.",
+                state="collect_name_phone",
+                must_ask="Please share your full name and a 10-digit phone number."
+            )
             add_message(session_id, "assistant", reply)
             return {"reply": reply, "suggestions": build_suggestions("collect_name_phone")}
 
+        # finalize booking request
         update_session(session_id, state="idle")
         s2 = get_session(session_id)
         upsert_lead(session_id, s2["name"], s2["phone"])
@@ -541,28 +695,34 @@ def chat(payload: ChatIn, x_app_token: str | None = Header(default=None)):
             f"Phone: {s2['phone']}\n"
             f"New/Returning: {s2.get('is_new','')}\n"
             f"Class: {s2.get('class_type','')}\n"
-            f"Preference: {s2.get('preferred_day','')}\n"
+            f"Preference day: {s2.get('preferred_day','')}\n"
+            f"Preference time: {s2.get('preferred_time','')}\n"
             f"Created: {utc_now()} UTC\n"
         )
         send_email(subject, body)
 
-        reply = (
-            "Perfect — request received ✅\n"
-            f"• Client: {s2['name']} ({s2['phone']})\n"
-            f"• Class: {s2['class_type']}\n"
-            f"• Preference: {s2['preferred_day']}\n\n"
-            f"Our team will confirm the exact time shortly. If you’d like, you can also call {BUSINESS['phone']}."
+        raw = (
+            "All set — I’ve got your request. ✅ "
+            "Our team will confirm the exact time shortly."
+        )
+        reply = humanize_text(
+            session_id,
+            raw,
+            state="idle",
+            must_ask=f"If you’d like, you can also call {BUSINESS['phone']} — would you like the team to text or call you?"
         )
         add_message(session_id, "assistant", reply)
         return {"reply": reply, "suggestions": build_suggestions("idle")}
 
-    # Normal Q&A
+    # -------------------------
+    # Normal Q&A (still controlled)
+    # -------------------------
     reply = qa_reply(session_id, msg, state="idle")
     add_message(session_id, "assistant", reply)
     return {"reply": reply, "suggestions": build_suggestions("idle")}
 
 # =========================
-# ADMIN (HTML + CSV + STATUS UPDATE)
+# ADMIN (HTML + CSV + STATUS UPDATE)  (unchanged)
 # =========================
 @app.get("/admin", response_class=HTMLResponse)
 def admin(token: str = ""):
@@ -606,6 +766,7 @@ a{{color:#00a884;text-decoration:none}} a:hover{{text-decoration:underline}}
         for r in rows:
             rid = r.get("id")
             status = esc(r.get("status","new"))
+            pref = (r.get("preferred_day","") or "") + (" " + (r.get("preferred_time","") or "") if r.get("preferred_time") else "")
             html += f"""
 <tr>
 <td>{rid}</td>
@@ -613,7 +774,7 @@ a{{color:#00a884;text-decoration:none}} a:hover{{text-decoration:underline}}
 <td>{esc(r.get("name",""))}</td>
 <td>{esc(r.get("phone",""))}</td>
 <td>{esc(r.get("is_new",""))}</td>
-<td>{esc(r.get("preferred_day",""))}</td>
+<td>{esc(pref.strip())}</td>
 <td>
   <select onchange="updateStatus({rid}, this.value)">
     <option value="new" {"selected" if status=="new" else ""}>new</option>
@@ -661,18 +822,17 @@ def admin_export_csv(token: str = ""):
     if token != ADMIN_TOKEN:
         raise HTTPException(status_code=401, detail="Unauthorized")
     rows = fetch_bookings(5000)
-    # CSV minimal
-    def safe(v): 
+    def safe(v):
         v = "" if v is None else str(v)
         v = v.replace('"','""')
         return f'"{v}"'
-    header = ["id","created_at","name","phone","is_new","class_type","preferred_day","status"]
+    header = ["id","created_at","name","phone","is_new","class_type","preferred_day","preferred_time","status"]
     lines = [",".join(header)]
     for r in rows:
         lines.append(",".join([
             safe(r.get("id")), safe(r.get("created_at")), safe(r.get("name")),
             safe(r.get("phone")), safe(r.get("is_new")), safe(r.get("class_type")),
-            safe(r.get("preferred_day")), safe(r.get("status")),
+            safe(r.get("preferred_day")), safe(r.get("preferred_time")), safe(r.get("status")),
         ]))
     csv_data = "\n".join(lines)
     return Response(
