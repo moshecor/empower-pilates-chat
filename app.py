@@ -3,6 +3,7 @@ from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
+from openai import OpenAI
 
 import requests
 from fastapi import FastAPI, Header, HTTPException
@@ -13,6 +14,9 @@ from pydantic import BaseModel
 # =========================
 # ENV / CONFIG
 # =========================
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+client = OpenAI(api_key=OPENAI_API_KEY)
 APP_TOKEN   = os.getenv("APP_TOKEN", "changeme")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "changeme")
 
@@ -314,6 +318,25 @@ def build_suggestions(state: str) -> list[str]:
 # =========================
 # LLM (human-like)
 # =========================
+def call_openai_json(system: str, user: str, timeout: int = 45) -> dict:
+    if not OPENAI_API_KEY:
+        return {"reply": "AI is not configured yet. Please try again later."}
+
+    resp = client.responses.create(
+        model=OPENAI_MODEL,
+        input=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        text={"format": {"type": "json_object"}},
+        timeout=timeout,
+    )
+
+    text = (resp.output_text or "").strip()
+    try:
+        return json.loads(text)
+    except Exception:
+        return {"reply": text[:900] if text else "Sorry — something went wrong."}
 def call_ollama(prompt: str) -> str:
     r = requests.post(
         f"{OLLAMA_HOST}/api/generate",
@@ -325,30 +348,41 @@ def call_ollama(prompt: str) -> str:
 
 def qa_reply(session_id: str, user_msg: str, state: str = "idle") -> str:
     history = fetch_recent_messages(session_id, limit=16)
-    transcript = "\n".join([f"{'USER' if m['role']=='user' else 'ASSISTANT'}: {m['content']}" for m in history])
+    transcript = "\n".join(
+        [f"{'USER' if m['role']=='user' else 'ASSISTANT'}: {m['content']}" for m in history]
+    )
 
     system = f"""
-You are the friendly, human-sounding assistant for {BUSINESS["name"]}.
+You are a friendly, human-sounding assistant for {BUSINESS["name"]}.
+ALWAYS reply in English.
 
-Business info:
+Hard rules:
+- Never invent user details (name, phone, day, time). If missing, ask.
+- Ask only ONE question at the end.
+- Do not invent pricing or availability beyond the facts below.
+
+Business facts:
 - Address: {BUSINESS["address"]}
 - Phone: {BUSINESS["phone"]}
 - Email: {BUSINESS["email"]}
 - Hours: {", ".join(BUSINESS["hours"])}
 - Offers: {", ".join(BUSINESS["offers"])}
 
-Style:
-- ALWAYS reply in English.
-- Warm, natural, helpful (2–5 short sentences).
-- Ask only ONE follow-up question if needed.
-- Do not invent pricing/availability beyond what's listed.
-- If user wants booking, you help collect: new/returning, day/time, full name, phone.
+Current booking state: {state}
 
-Current booking state: {state}.
-If state != "idle", answer the question briefly AND then continue the booking flow.
-
-Return ONLY JSON like: {{"reply":"..."}}.
+Return ONLY JSON: {{"reply":"..."}}
 """.strip()
+
+    user = f"""CHAT HISTORY:
+{transcript}
+
+USER MESSAGE:
+{user_msg}
+""".strip()
+
+    data = call_openai_json(system, user)
+    return (data.get("reply") or "").strip()[:900] or "Sorry — can you rephrase that?"
+
 
     prompt = f"{system}\n\nCHAT HISTORY:\n{transcript}\n\nUSER: {user_msg}\nASSISTANT:"
     raw = call_ollama(prompt)
