@@ -155,13 +155,14 @@ fetch(`${API_BASE}/api/chat`, {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
-    "OPENAI_API_KEY":
+    "x-app-token": "APP_TOKEN"
   },
   body: JSON.stringify({
     session_id,
     message
   })
 });
+
 
         const data = await res.json();
         waiting.querySelector('.bubble').textContent = data.reply || "(no reply)";
