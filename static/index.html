@@ -1,189 +1,77 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>Empower Pilates Chat</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Chat</title>
   <style>
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-      background: #111;
-      color: #fff;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-    }
-
-    .chat {
-      width: 100%;
-      max-width: 420px;
-      height: 90vh;
-      background: #1c1c1c;
-      border-radius: 12px;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-
-    .header {
-      padding: 12px;
-      background: #0f766e;
-      font-weight: bold;
-      text-align: center;
-    }
-
-    .messages {
-      flex: 1;
-      padding: 12px;
-      overflow-y: auto;
-    }
-
-    .msg {
-      margin-bottom: 10px;
-      max-width: 80%;
-      padding: 10px;
-      border-radius: 10px;
-      font-size: 14px;
-    }
-
-    .bot {
-      background: #2a2a2a;
-      align-self: flex-start;
-    }
-
-    .user {
-      background: #0f766e;
-      align-self: flex-end;
-    }
-
-    .input {
-      display: flex;
-      padding: 10px;
-      background: #000;
-    }
-
-    .input input {
-      flex: 1;
-      padding: 10px;
-      border-radius: 8px;
-      border: none;
-      outline: none;
-    }
-
-    .input button {
-      margin-left: 8px;
-      padding: 10px 14px;
-      border: none;
-      border-radius: 8px;
-      background: #0f766e;
-      color: #fff;
-      cursor: pointer;
-    }
-
-    .quick {
-      display: flex;
-      gap: 6px;
-      padding: 8px;
-      flex-wrap: wrap;
-      background: #111;
-    }
-
-    .quick button {
-      padding: 6px 10px;
-      border-radius: 999px;
-      border: none;
-      background: #333;
-      color: #fff;
-      cursor: pointer;
-      font-size: 12px;
-    }
+    body { font-family: system-ui, Arial; margin: 20px; }
+    #log { border: 1px solid #ddd; padding: 12px; height: 60vh; overflow:auto; }
+    .me { color:#0a7; margin: 8px 0; }
+    .bot { color:#333; margin: 8px 0; }
+    .err { color:#c00; margin: 8px 0; }
+    .row { display:flex; gap:8px; margin-top:10px; }
+    input { flex:1; padding:10px; }
+    button { padding:10px 14px; }
   </style>
 </head>
 <body>
+  <h3>Chat</h3>
+  <div id="log"></div>
 
-<div class="chat">
-  <div class="header">Empower Pilates</div>
-
-  <div class="messages" id="messages"></div>
-
-  <div class="quick">
-    <button onclick="sendQuick('Book a class')">Book a class</button>
-    <button onclick="sendQuick('Free trial')">Free trial</button>
-    <button onclick="sendQuick('What are your hours?')">What are your hours?</button>
-    <button onclick="sendQuick('Where are you located?')">Where are you located?</button>
+  <div class="row">
+    <input id="msg" placeholder="Type..." />
+    <button id="send">Send</button>
   </div>
-
-  <div class="input">
-    <input id="input" placeholder="Type a message..." />
-    <button onclick="send()">Send</button>
-  </div>
-</div>
 
 <script>
   const API_BASE = window.location.origin;
-
-  // 🔐 החלף לערך של APP_TOKEN מ-Render
+  // זה ה-APP_TOKEN שאתה שם ב-Render ENV בתור APP_TOKEN
+  // כאן הוא נשאר בקוד של הלקוח (זה בסדר כי זה רק "שער" לא ה-OpenAI key).
   const APP_TOKEN = "pilates_chat_9o8i7u6y5t!!";
 
-  const messagesEl = document.getElementById("messages");
-  const inputEl = document.getElementById("input");
+  const log = document.getElementById("log");
+  const input = document.getElementById("msg");
 
-  function addMessage(text, who) {
-    const div = document.createElement("div");
-    div.className = "msg " + who;
-    div.innerText = text;
-    messagesEl.appendChild(div);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+  function addLine(cls, text){
+    const d = document.createElement("div");
+    d.className = cls;
+    d.textContent = text;
+    log.appendChild(d);
+    log.scrollTop = log.scrollHeight;
   }
 
-  async function sendMessage(message) {
-    const res = await fetch(`${API_BASE}/api/chat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-app-token": APP_TOKEN
-      },
-      body: JSON.stringify({
-        session_id: "web",
-        message
-      })
-    });
+  async function send(){
+    const message = input.value.trim();
+    if(!message) return;
+    input.value = "";
+    addLine("me", "You: " + message);
 
-    if (!res.ok) {
-      throw new Error("API error " + res.status);
-    }
+    try{
+      const res = await fetch(`${API_BASE}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-app-token": APP_TOKEN
+        },
+        body: JSON.stringify({ message })
+      });
 
-    return await res.json();
-  }
+      const data = await res.json().catch(() => ({}));
 
-  async function send() {
-    const text = inputEl.value.trim();
-    if (!text) return;
+      if(!res.ok){
+        addLine("err", `Error ${res.status}: ${(data && data.detail) ? data.detail : "Request failed"}`);
+        return;
+      }
 
-    inputEl.value = "";
-    addMessage(text, "user");
-
-    try {
-      const data = await sendMessage(text);
-      addMessage(data.reply, "bot");
-    } catch (e) {
-      addMessage("Connection error. Please try again.", "bot");
+      addLine("bot", "Bot: " + (data.reply || ""));
+    }catch(e){
+      addLine("err", "Network error: " + e.message);
     }
   }
 
-  function sendQuick(text) {
-    inputEl.value = text;
-    send();
-  }
-
-  // הודעת פתיחה
-  addMessage(
-    "Hi 👋\nHow can I help you today?\n\n• Book a Pilates class\n• Start a free trial\n• Check our hours or location",
-    "bot"
-  );
+  document.getElementById("send").onclick = send;
+  input.addEventListener("keydown", (e)=>{ if(e.key==="Enter") send(); });
 </script>
-
 </body>
 </html>
