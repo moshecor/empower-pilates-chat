@@ -149,11 +149,20 @@
       const waiting = addMessage('bot', "…");
 
       try{
-        const res = await fetch('/api/chat', {
-          method:'POST',
-          headers:{ 'Content-Type':'application/json', 'X-App-Token': APP_TOKEN },
-          body: JSON.stringify({ session_id: sessionId, message })
-        });
+        const API_BASE = window.location.origin;
+
+fetch(`${API_BASE}/api/chat`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "OPENAI_API_KEY":
+  },
+  body: JSON.stringify({
+    session_id,
+    message
+  })
+});
+
         const data = await res.json();
         waiting.querySelector('.bubble').textContent = data.reply || "(no reply)";
         setSuggestions(data.suggestions || []);
