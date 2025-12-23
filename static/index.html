@@ -1,194 +1,189 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="UTF-8" />
   <title>Empower Pilates Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
-    :root{
-      --bg:#0b141a; --panel:#111b21; --text:#e9edef; --muted:#8696a0;
-      --bubble-me:#005c4b; --bubble-bot:#202c33; --accent:#00a884;
-      --border:rgba(255,255,255,.08);
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #111;
+      color: #fff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
     }
-    *{box-sizing:border-box}
-    body{margin:0;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;background:linear-gradient(180deg,#071017,#0b141a);
-      color:var(--text);height:100vh;display:flex;align-items:center;justify-content:center;}
-    .app{width:min(980px,96vw);height:min(760px,92vh);background:var(--panel);border:1px solid var(--border);border-radius:18px;
-      overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.45);display:flex;flex-direction:column;}
-    .topbar{padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);
-      background:rgba(17,27,33,.85);backdrop-filter:blur(8px);}
-    .left{display:flex;align-items:center;gap:12px}
-    .avatar{width:40px;height:40px;border-radius:999px;background:radial-gradient(circle at 30% 30%,#00a884,#005c4b);
-      display:flex;align-items:center;justify-content:center;font-weight:800}
-    .title{display:flex;flex-direction:column;line-height:1.1}
-    .title b{font-size:14px}.title span{font-size:12px;color:var(--muted)}
-    .top-actions{display:flex;gap:8px;align-items:center}
-    .mini{background:#1f2c34;color:var(--text);border:1px solid rgba(255,255,255,.15);border-radius:999px;padding:7px 12px;font-size:13px;cursor:pointer}
-    .mini:hover{background:var(--accent);color:#0b141a}
 
-    .chat{flex:1;padding:18px 12px;overflow:auto;background:
-      radial-gradient(circle at 20% 10%, rgba(0,168,132,.08), transparent 45%),
-      radial-gradient(circle at 90% 60%, rgba(0,168,132,.06), transparent 45%),
-      linear-gradient(180deg, rgba(255,255,255,.02), transparent 30%);}
-    .row{display:flex;margin:10px 0;}
-    .row.me{justify-content:flex-end}
-    .row.bot{justify-content:flex-start}
-    .bubble{max-width:min(680px,92%);padding:10px 12px;border-radius:14px;border:1px solid var(--border);white-space:pre-wrap;word-break:break-word;
-      font-size:14px;line-height:1.35;}
-    .row.me .bubble{background:var(--bubble-me);border-top-right-radius:6px;}
-    .row.bot .bubble{background:var(--bubble-bot);border-top-left-radius:6px;}
-    .meta{margin-top:6px;font-size:11px;color:rgba(233,237,239,.65);display:flex;justify-content:flex-end}
-    .row.bot .meta{justify-content:flex-start;color:rgba(233,237,239,.55)}
-    .pill{font-size:11px;color:var(--muted);border:1px solid var(--border);padding:6px 10px;border-radius:999px;width:fit-content;margin:0 auto 14px auto;
-      background: rgba(0,0,0,.14);}
+    .chat {
+      width: 100%;
+      max-width: 420px;
+      height: 90vh;
+      background: #1c1c1c;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
 
-    .suggestions{padding:10px 12px 0 12px;display:flex;gap:8px;flex-wrap:wrap;background:rgba(17,27,33,.9);border-top:1px solid var(--border);}
-    .chip{background:#1f2c34;color:var(--text);border:1px solid rgba(255,255,255,.15);border-radius:999px;padding:7px 12px;font-size:13px;cursor:pointer}
-    .chip:hover{background:var(--accent);color:#0b141a}
+    .header {
+      padding: 12px;
+      background: #0f766e;
+      font-weight: bold;
+      text-align: center;
+    }
 
-    .composer{padding:12px;display:flex;gap:10px;background:rgba(17,27,33,.9);}
-    .input{flex:1;background:#0b141a;border:1px solid var(--border);color:var(--text);padding:12px 14px;border-radius:999px;outline:none;font-size:14px;}
-    .btn{width:44px;height:44px;border:none;border-radius:999px;background:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;
-      box-shadow:0 10px 20px rgba(0,168,132,.22);}
-    .btn:disabled{opacity:.55;cursor:not-allowed}
-    .btn svg{fill:white}
+    .messages {
+      flex: 1;
+      padding: 12px;
+      overflow-y: auto;
+    }
+
+    .msg {
+      margin-bottom: 10px;
+      max-width: 80%;
+      padding: 10px;
+      border-radius: 10px;
+      font-size: 14px;
+    }
+
+    .bot {
+      background: #2a2a2a;
+      align-self: flex-start;
+    }
+
+    .user {
+      background: #0f766e;
+      align-self: flex-end;
+    }
+
+    .input {
+      display: flex;
+      padding: 10px;
+      background: #000;
+    }
+
+    .input input {
+      flex: 1;
+      padding: 10px;
+      border-radius: 8px;
+      border: none;
+      outline: none;
+    }
+
+    .input button {
+      margin-left: 8px;
+      padding: 10px 14px;
+      border: none;
+      border-radius: 8px;
+      background: #0f766e;
+      color: #fff;
+      cursor: pointer;
+    }
+
+    .quick {
+      display: flex;
+      gap: 6px;
+      padding: 8px;
+      flex-wrap: wrap;
+      background: #111;
+    }
+
+    .quick button {
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: none;
+      background: #333;
+      color: #fff;
+      cursor: pointer;
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
-  <div class="app">
-    <div class="topbar">
-      <div class="left">
-        <div class="avatar">EP</div>
-        <div class="title">
-          <b>Empower Pilates</b>
-          <span>Online • typically replies in seconds</span>
-        </div>
-      </div>
-      <div class="top-actions">
-        <button class="mini" id="resetBtn">↻ Reset</button>
-      </div>
-    </div>
 
-    <div id="chat" class="chat">
-      <div class="pill">This chat is powered by a local AI model (free).</div>
-    </div>
+<div class="chat">
+  <div class="header">Empower Pilates</div>
 
-    <div class="suggestions" id="suggestions"></div>
+  <div class="messages" id="messages"></div>
 
-    <form id="form" class="composer">
-      <input id="input" class="input" placeholder="Type a message…" autocomplete="off" />
-      <button id="send" class="btn" type="submit" aria-label="Send">
-        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M2 21l21-9L2 3v7l15 2-15 2v7z"></path>
-        </svg>
-      </button>
-    </form>
+  <div class="quick">
+    <button onclick="sendQuick('Book a class')">Book a class</button>
+    <button onclick="sendQuick('Free trial')">Free trial</button>
+    <button onclick="sendQuick('What are your hours?')">What are your hours?</button>
+    <button onclick="sendQuick('Where are you located?')">Where are you located?</button>
   </div>
 
-  <script>
-    const chat = document.getElementById('chat');
-    const form = document.getElementById('form');
-    const input = document.getElementById('input');
-    const sendBtn = document.getElementById('send');
-    const sugWrap = document.getElementById('suggestions');
-    const resetBtn = document.getElementById('resetBtn');
+  <div class="input">
+    <input id="input" placeholder="Type a message..." />
+    <button onclick="send()">Send</button>
+  </div>
+</div>
 
-    const APP_TOKEN = "changeme";
+<script>
+  const API_BASE = window.location.origin;
 
-    let sessionId = localStorage.getItem('session_id');
-    if (!sessionId) {
-      sessionId = 'sess_' + Math.random().toString(16).slice(2);
-      localStorage.setItem('session_id', sessionId);
-    }
+  // 🔐 החלף לערך של APP_TOKEN מ-Render
+  const APP_TOKEN = "pilates_chat_9o8i7u6y5t!!";
 
-    function timeNow(){
-      const d = new Date();
-      return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-    }
+  const messagesEl = document.getElementById("messages");
+  const inputEl = document.getElementById("input");
 
-    function addMessage(who, text) {
-      const row = document.createElement('div');
-      row.className = `row ${who}`;
-      const bubble = document.createElement('div');
-      bubble.className = 'bubble';
-      bubble.textContent = text;
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.textContent = timeNow();
-      row.appendChild(bubble); row.appendChild(meta);
-      chat.appendChild(row);
-      chat.scrollTop = chat.scrollHeight;
-      return row;
-    }
+  function addMessage(text, who) {
+    const div = document.createElement("div");
+    div.className = "msg " + who;
+    div.innerText = text;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
 
-    function setSuggestions(items){
-      sugWrap.innerHTML = '';
-      (items || []).slice(0, 8).forEach(t => {
-        const b = document.createElement('button');
-        b.className = 'chip';
-        b.textContent = t;
-        b.onclick = () => sendMessage(t);
-        sugWrap.appendChild(b);
-      });
-    }
-
-    addMessage('bot',
-      "Hi! 👋 I’m the virtual assistant for Empower Pilates.\n\n" +
-      "I can help you:\n• Book a Pilates class\n• Start a free trial\n• Check our hours or location\n\n" +
-      "How can I help you today?"
-    );
-    setSuggestions(["Book a class","Free trial","What are your hours?","Where are you located?"]);
-
-    async function sendMessage(msg){
-      const message = (msg ?? input.value).trim();
-      if(!message) return;
-      input.value = '';
-      sendBtn.disabled = true; input.disabled = true;
-
-      addMessage('me', message);
-      const waiting = addMessage('bot', "…");
-
-      try{
-        const API_BASE = window.location.origin;
-
-fetch(`${API_BASE}/api/chat`, {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    "x-app-token": "APP_TOKEN"
-  },
-  body: JSON.stringify({
-    session_id,
-    message
-  })
-});
-
-
-        const data = await res.json();
-        waiting.querySelector('.bubble').textContent = data.reply || "(no reply)";
-        setSuggestions(data.suggestions || []);
-      }catch(e){
-        waiting.querySelector('.bubble').textContent = "Connection error. Please try again.";
-      }finally{
-        sendBtn.disabled = false; input.disabled = false; input.focus();
-        chat.scrollTop = chat.scrollHeight;
-      }
-    }
-
-    form.addEventListener('submit', (e) => { e.preventDefault(); sendMessage(); });
-
-    resetBtn.addEventListener('click', async () => {
-      try{
-        await fetch('/api/reset', {
-          method:'POST',
-          headers:{ 'Content-Type':'application/json', 'X-App-Token': APP_TOKEN },
-          body: JSON.stringify({ session_id: sessionId })
-        });
-      }catch(e){}
-      chat.innerHTML = '<div class="pill">This chat is powered by a local AI model (free).</div>';
-      addMessage('bot', "All set ✅ Let’s start fresh. How can I help you today?");
-      setSuggestions(["Book a class","Free trial","What are your hours?","Where are you located?"]);
+  async function sendMessage(message) {
+    const res = await fetch(`${API_BASE}/api/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-app-token": APP_TOKEN
+      },
+      body: JSON.stringify({
+        session_id: "web",
+        message
+      })
     });
-  </script>
+
+    if (!res.ok) {
+      throw new Error("API error " + res.status);
+    }
+
+    return await res.json();
+  }
+
+  async function send() {
+    const text = inputEl.value.trim();
+    if (!text) return;
+
+    inputEl.value = "";
+    addMessage(text, "user");
+
+    try {
+      const data = await sendMessage(text);
+      addMessage(data.reply, "bot");
+    } catch (e) {
+      addMessage("Connection error. Please try again.", "bot");
+    }
+  }
+
+  function sendQuick(text) {
+    inputEl.value = text;
+    send();
+  }
+
+  // הודעת פתיחה
+  addMessage(
+    "Hi 👋\nHow can I help you today?\n\n• Book a Pilates class\n• Start a free trial\n• Check our hours or location",
+    "bot"
+  );
+</script>
+
 </body>
 </html>
